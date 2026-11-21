@@ -61,6 +61,20 @@ python app.py
 
 7. Open `http://127.0.0.1:5000/` in your browser.
 
+### Optional: run with a local model (LM Studio)
+
+Instead of calling Gemini, you can play against a model running on your own machine, with no API key and no rate limits. This only works locally; hosted deployments (like Vercel) must use Gemini.
+
+1. Install [LM Studio](https://lmstudio.ai/) and download a small instruct model (for example Gemma 4 E4B).
+2. In LM Studio's **Developer** tab, load the model and start the server (default `http://localhost:1234`).
+3. In `.env`, set:
+
+```bash
+LLM_PROVIDER=lmstudio
+```
+
+4. Run `python app.py` as usual. Set `LMSTUDIO_MODEL` only if you have more than one model loaded.
+
 ## How to Play
 
 - Type `help` for a list of available commands.
@@ -71,7 +85,7 @@ python app.py
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENCE](LICENCE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Author
 

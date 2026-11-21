@@ -1,0 +1,138 @@
+:root {
+  --bg: #050a05;
+  --fg: #33ff66;
+  --dim: #1f9e3f;
+  --accent: #b6ffc8;
+  --danger: #ff4d4d;
+  --win: #ffd84d;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "VT323", "Courier New", monospace;
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+/* faint CRT scanlines */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(to bottom, rgba(0, 0, 0, 0) 0, rgba(0, 0, 0, 0) 2px, rgba(0, 0, 0, 0.25) 3px);
+}
+
+.screen {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 16px;
+  text-shadow: 0 0 4px rgba(51, 255, 102, 0.6);
+}
+
+/* ---- menu ---- */
+.menu {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 18px;
+}
+
+.title {
+  margin: 0;
+  font-size: clamp(12px, 3.2vw, 22px);
+  line-height: 1.05;
+  color: var(--accent);
+}
+
+.tagline { margin: 0; color: var(--dim); }
+
+.menu-options { display: flex; flex-direction: column; gap: 8px; }
+
+.menu-item {
+  font: inherit;
+  color: var(--fg);
+  background: none;
+  border: none;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 2px 10px;
+  text-shadow: inherit;
+}
+
+.menu-item:hover, .menu-item:focus-visible {
+  background: var(--fg);
+  color: var(--bg);
+  text-shadow: none;
+  outline: none;
+}
+
+.instructions { max-width: 560px; color: var(--accent); }
+.instructions p { margin: 4px 0; }
+
+.hl { color: var(--accent); }
+
+.footer { color: var(--dim); font-size: 16px; }
+
+/* ---- terminal ---- */
+.terminal {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.output {
+  flex: 1;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.line { margin: 0 0 8px; }
+.line.user { color: var(--accent); }
+.line.system { color: var(--dim); }
+.line.error { color: var(--danger); }
+.line.dead { color: var(--danger); font-size: 1.4em; }
+.line.won { color: var(--win); font-size: 1.4em; }
+
+.input-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+}
+
+.prompt { color: var(--accent); }
+
+#command {
+  flex: 1;
+  font: inherit;
+  color: var(--fg);
+  background: transparent;
+  border: none;
+  outline: none;
+  caret-color: var(--fg);
+  text-shadow: inherit;
+}
+
+#command:disabled { opacity: 0.5; }
+
+.thinking::after {
+  content: "";
+  animation: dots 1.2s steps(4, end) infinite;
+}
+
+@keyframes dots {
+  0% { content: ""; }
+  25% { content: "."; }
+  50% { content: ".."; }
+  75% { content: "..."; }
+}
