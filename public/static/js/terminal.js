@@ -13,6 +13,9 @@
   // The story so far. The server is stateless, so the browser keeps the
   // conversation and sends it with every command. Reloading starts a new game.
   var chatHistory = [];
+  // This run's rules (move limit, hidden easter egg), picked by the server
+  // when the game starts and sent back with every move.
+  var run = null;
 
   var HELP_TEXT = [
     "Commands:",
@@ -22,7 +25,8 @@
     "  restart  start a new game",
     "  menu     back to the main menu",
     "",
-    "Once the game has started, type anything you want to do."
+    "Once the game has started, type anything you want to do.",
+    "Each run lasts 8-10 moves. Then you escape or you don't."
   ].join("\n");
 
   function print(text, cls) {
@@ -108,8 +112,9 @@
         // Only record the turn once it succeeded, so a failed request can be retried.
         chatHistory.push({ role: "user", content: message });
         chatHistory.push({ role: "assistant", content: event.answer });
+        run = event.run;  // chosen by the server on the opening move; sent back each move
         if (onSuccess) onSuccess();
-        handleStatus(event.status);
+        handleStatus(event);
       } else if (event.type === "error") {
         fail(event.error || "something went wrong");
       }
@@ -118,7 +123,7 @@
     fetch(window.STREAM_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: message, history: chatHistory })
+      body: JSON.stringify({ message: message, history: chatHistory, run: run })
     })
       .then(function (res) {
         if (!res.ok) {
@@ -136,15 +141,37 @@
       });
   }
 
-  function handleStatus(status) {
+  function handleStatus(event) {
+    var status = event.status;
     if (status === "DEAD") {
       gameOver = true;
       print("*** YOU DIED ***", "dead");
-      print("Type 'restart' to try again.", "system");
     } else if (status === "WON") {
       gameOver = true;
       print("*** YOU ESCAPED THE FOREST ***", "won");
-      print("Type 'restart' to play again.", "system");
+    } else if (status === "DREAM") {
+      gameOver = true;
+      print("*** YOU WAKE UP ***", "won");
+    }
+
+    if (gameOver) {
+      if (event.easter_egg) {
+        print(
+          "EASTER EGG FOUND: " + event.easter_egg.title + "\n" +
+          "This run hid one of " + event.easter_egg.total + " secret easter eggs. Can you find the others?",
+          "egg"
+        );
+      }
+      print("Type 'restart' to " + (status === "DEAD" ? "try again." : "play again."), "system");
+      return;
+    }
+
+    if (event.moves_left === 1) {
+      print("[ Final move. Choose wisely. ]", "system");
+    } else if (event.moves_left > 1 && event.move > 0) {
+      print("[ " + event.moves_left + " moves left ]", "system");
+    } else if (event.move === 0) {
+      print("[ You have " + event.moves_left + " moves to find a way out. ]", "system");
     }
   }
 

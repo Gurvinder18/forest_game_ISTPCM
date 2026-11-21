@@ -10,6 +10,7 @@ logging.basicConfig(level=logging.INFO)  # before module imports so their startu
 from config import MAX_HISTORY_TOKENS, NARRATOR_LENGTH, NARRATOR_MODELS, NARRATOR_PROMPT, STATUS_MODELS, STATUS_PROMPT
 from modules.conversation import trim_history
 from modules.llm import classify_status, generate_reply, stream_reply
+from modules.runs import final_status, new_run, revealed_egg, stage_instructions, validate_run
 from modules.text_formatter import StreamStatusFilter, extract_status, format_reply
 
 # Static files live in public/static so Vercel can serve them from its CDN.
@@ -43,10 +44,11 @@ def clean_history(raw) -> list:
     return history
 
 
-def build_chat():
+def build_turn():
     """Turn a player command request into the chat to send to the AI.
 
-    Returns (chat, None) or (None, error_response).
+    Returns (turn, None) or (None, error_response), where turn holds the
+    chat plus this run's rules: {"chat", "run", "move"}.
     """
     data = request.get_json(silent=True)
     command = data.get("message") if isinstance(data, dict) else None
@@ -55,13 +57,25 @@ def build_chat():
         return None, (jsonify({"error": "Invalid JSON data"}), 400)
 
     history = clean_history(data.get("history"))
+    # Move 0 is the opening scene; each later player message is one move.
+    move = sum(1 for m in history if m["role"] == "user")
+    if move == 0:
+        run = new_run()  # a fresh run: pick its length and maybe an easter egg
+    else:
+        run = validate_run(data.get("run"))
+        if run is None:
+            return None, (jsonify({"error": "Invalid run, restart the game"}), 400)
+        if move > run["max_moves"]:
+            return None, (jsonify({"error": "This run is over, restart the game"}), 400)
+
     history.append({"role": "user", "content": command[:MAX_COMMAND_CHARS]})
-    chat = trim_history([{"role": "system", "content": NARRATOR_PROMPT}] + history, MAX_HISTORY_TOKENS)
-    return chat, None
+    system = f"{NARRATOR_PROMPT}\n\n{stage_instructions(run, move)}"
+    chat = trim_history([{"role": "system", "content": system}] + history, MAX_HISTORY_TOKENS)
+    return {"chat": chat, "run": run, "move": move}, None
 
 
-def finish_reply(raw_reply: str):
-    """Split off the status tag and tidy the reply.
+def finish_reply(raw_reply: str, turn: dict) -> dict:
+    """Split off the status tag, tidy the reply and apply the run rules.
 
     The narrator tags its own reply with the player's status, so most turns
     need one AI call. Only if the tag is missing do we make a second,
@@ -72,8 +86,17 @@ def finish_reply(raw_reply: str):
     if status is None:
         logging.info("Narrator left out the status tag; using the classifier")
         status = classify_status(STATUS_PROMPT, reply, STATUS_MODELS)
-    logging.info("Player status: %s", status)
-    return reply, status
+    run, move = turn["run"], turn["move"]
+    status = final_status(run, move, status)
+    logging.info("Move %s/%s, player status: %s", move, run["max_moves"], status)
+    return {
+        "answer": reply,
+        "status": status,
+        "run": run,
+        "move": move,
+        "moves_left": run["max_moves"] - move,
+        "easter_egg": revealed_egg(run, move) if status != "DEAD" else None,
+    }
 
 
 @app.route("/")
@@ -88,17 +111,17 @@ def terminal():
     if request.method == "GET":
         return render_template("terminal.html")
 
-    chat, error = build_chat()
+    turn, error = build_turn()
     if error:
         return error
 
     try:
-        reply, status = finish_reply(generate_reply(chat, NARRATOR_MODELS))
+        result = finish_reply(generate_reply(turn["chat"], NARRATOR_MODELS), turn)
     except Exception:
         logging.exception("AI request failed")
         return jsonify({"error": "The AI service is unavailable"}), 502
 
-    return jsonify({"answer": reply, "status": status})
+    return jsonify(result)
 
 
 @app.route("/terminal/stream", methods=["POST"])
@@ -107,12 +130,12 @@ def terminal_stream():
 
     The response is newline-delimited JSON:
       {"type": "chunk", "text": "..."}            pieces of the reply, as they arrive
-      {"type": "done", "answer": "...", "status": "..."}  the final, cleaned-up reply
+      {"type": "done", "answer": "...", "status": "...", ...}  the final reply plus run info
       {"type": "error", "error": "..."}           if the AI fails
     If a host buffers the response, the browser still gets every line, just
     all at once.
     """
-    chat, error = build_chat()
+    turn, error = build_turn()
     if error:
         return error
 
@@ -120,7 +143,7 @@ def terminal_stream():
         pieces = []
         status_filter = StreamStatusFilter()
         try:
-            for piece in stream_reply(chat, NARRATOR_MODELS):
+            for piece in stream_reply(turn["chat"], NARRATOR_MODELS):
                 pieces.append(piece)
                 visible = status_filter.feed(piece)
                 if visible:
@@ -128,8 +151,8 @@ def terminal_stream():
             visible = status_filter.finish()
             if visible:
                 yield json.dumps({"type": "chunk", "text": visible}) + "\n"
-            reply, status = finish_reply("".join(pieces))
-            yield json.dumps({"type": "done", "answer": reply, "status": status}) + "\n"
+            result = finish_reply("".join(pieces), turn)
+            yield json.dumps({"type": "done", **result}) + "\n"
         except Exception:
             logging.exception("AI request failed")
             yield json.dumps({"type": "error", "error": "The AI service is unavailable"}) + "\n"
