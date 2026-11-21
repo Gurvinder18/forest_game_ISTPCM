@@ -80,8 +80,6 @@ body::after {
 
 .hl { color: var(--accent); }
 
-.footer { color: var(--dim); font-size: 16px; }
-
 /* ---- terminal ---- */
 .terminal {
   height: 100%;
