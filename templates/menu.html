@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Forest Game</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <main class="screen menu">
+    <pre class="title" aria-label="Forest Game">
+ ___  ___   ___  ___  ___  _____
+| __|/ _ \ | _ \| __|/ __||_   _|
+| _|| (_) ||   /| _| \__ \  | |
+|_|  \___/ |_|_\|___||___/  |_|
+   ___    _    __  __  ___
+  / __|  /_\  |  \/  || __|
+ | (_ | / _ \ | |\/| || _|
+  \___|/_/ \_\|_|  |_||___|
+    </pre>
+
+    <p class="tagline">You wake up in a forest full of vampires, hunters and worse.<br>Talk your way out. Or don't.</p>
+
+    <nav class="menu-options">
+      <a class="menu-item" href="{{ url_for('terminal') }}">&gt; START GAME</a>
+      <button class="menu-item" type="button" id="how-to-play">&gt; HOW TO PLAY</button>
+    </nav>
+
+    <section class="instructions" id="instructions" hidden>
+      <p>Type <span class="hl">start</span> to begin, then type whatever you want to do.</p>
+      <p>Type <span class="hl">help</span> in the terminal for all commands.</p>
+      <p>Think before you act. Reckless players don't make it out.</p>
+    </section>
+
+    <footer class="footer">ISTPCM group assignment &middot; narrated by Gemini</footer>
+  </main>
+
+  <script>
+    document.getElementById("how-to-play").addEventListener("click", function () {
+      var box = document.getElementById("instructions");
+      box.hidden = !box.hidden;
+    });
+  </script>
+</body>
+</html>

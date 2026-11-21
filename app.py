@@ -3,15 +3,15 @@ import logging
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 
-load_dotenv()  # must run before config reads model overrides
+load_dotenv(override=True)  # must run before config reads model overrides; override so edits to .env win on reload
+logging.basicConfig(level=logging.INFO)  # before module imports so their startup logs show
 
 from config import MAX_HISTORY_TOKENS, NARRATOR_MODELS, NARRATOR_PROMPT, STATUS_MODELS, STATUS_PROMPT
 from modules.conversation import trim_history
-from modules.gemini_client import classify_status, generate_reply
+from modules.llm import classify_status, generate_reply
 from modules.text_formatter import format_reply
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
 
 
 def new_history() -> list:
@@ -37,7 +37,7 @@ def terminal():
         return render_template("terminal.html")
 
     try:
-        command = request.get_json()["message"]
+        command = request.get_json(silent=True)["message"]
     except (KeyError, TypeError):
         logging.error("Invalid JSON data: %s", request.data)
         return jsonify({"error": "Invalid JSON data"}), 400
