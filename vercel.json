@@ -3,7 +3,7 @@
   "functions": {
     "app.py": {
       "maxDuration": 60,
-      "excludeFiles": "{public/**,venv/**,.venv/**,**/__pycache__/**}"
+      "excludeFiles": "{public/**,tests/**,venv/**,.venv/**,**/__pycache__/**}"
     }
   }
 }

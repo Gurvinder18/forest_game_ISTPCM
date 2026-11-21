@@ -24,7 +24,7 @@ def format_reply(text: str) -> str:
     text = re.sub(r"__(.+?)__", r"\1", text)
     text = re.sub(r"(?<!\*)\*(?!\s)(.+?)(?<!\s)\*(?!\*)", r"\1", text)  # italics
     text = re.sub(r"`([^`]*)`", r"\1", text)  # inline code
-    text = re.sub(r"^\s*[*\-]\s+", "- ", text, flags=re.MULTILINE)  # bullets
+    text = re.sub(r"^[ \t]*[*\-][ \t]+", "- ", text, flags=re.MULTILINE)  # bullets (keep blank lines above)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()

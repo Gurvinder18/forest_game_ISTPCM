@@ -44,7 +44,11 @@ def _build_request(model: str, system_prompt: str, messages: list):
         role = "model" if msg["role"] == "assistant" else "user"
         contents.append(types.Content(role=role, parts=[types.Part(text=msg["content"])]))
 
-    config = types.GenerateContentConfig()
+    # The game uses no tools, so turn off automatic function calling; this also
+    # silences the SDK's "AFC is enabled" log line on every request.
+    config = types.GenerateContentConfig(
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
+    )
     if system_prompt:
         if _supports_system_instruction(model):
             config.system_instruction = system_prompt

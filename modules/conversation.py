@@ -24,4 +24,9 @@ def trim_history(history: list, max_tokens: int) -> list:
     while len(turns) > 1 and total(system + turns) > max_tokens:
         turns.pop(0)
 
+    # After trimming, the conversation must start with a user turn: chat
+    # templates like Gemma's reject a history that opens with the assistant.
+    while len(turns) > 1 and turns[0]["role"] != "user":
+        turns.pop(0)
+
     return system + turns

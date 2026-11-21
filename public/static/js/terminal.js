@@ -40,7 +40,7 @@
     if (!value) input.focus();
   }
 
-  function sendToNarrator(message) {
+  function sendToNarrator(message, onSuccess) {
     setBusy(true);
     var thinking = print("The forest stirs", "system thinking");
 
@@ -61,6 +61,7 @@
         // Only record the turn once it succeeded, so a failed request can be retried.
         chatHistory.push({ role: "user", content: message });
         chatHistory.push({ role: "assistant", content: result.data.answer });
+        if (onSuccess) onSuccess();
         print(result.data.answer);
         handleStatus(result.data.status);
       })
@@ -104,8 +105,11 @@
 
     if (!started) {
       if (cmd !== "start") return print("Type 'start' to begin, or 'help' for commands.", "system");
-      started = true;
-      return sendToNarrator("Start the game. Describe where I wake up in the forest.");
+      // Only count the game as started once the opening scene arrives, so a
+      // failed request can be retried by typing 'start' again.
+      return sendToNarrator("Start the game. Describe where I wake up in the forest.", function () {
+        started = true;
+      });
     }
 
     sendToNarrator(text);
