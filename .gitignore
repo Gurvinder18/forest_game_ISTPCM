@@ -1,0 +1,11 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Environment variables (API keys live here, never commit them)
+.env
+*.env
+
+# Virtual environments
+.venv/
+venv/
