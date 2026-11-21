@@ -10,6 +10,9 @@
   var busy = false;
   var commandHistory = [];
   var historyIndex = 0;
+  // The story so far. The server is stateless, so the browser keeps the
+  // conversation and sends it with every command. Reloading starts a new game.
+  var chatHistory = [];
 
   var HELP_TEXT = [
     "Commands:",
@@ -44,7 +47,7 @@
     fetch(window.TERMINAL_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: message })
+      body: JSON.stringify({ message: message, history: chatHistory })
     })
       .then(function (res) {
         return res.json().then(function (data) { return { ok: res.ok, data: data }; });
@@ -55,6 +58,9 @@
           print("Error: " + (result.data.error || "something went wrong") + ". Try again.", "error");
           return;
         }
+        // Only record the turn once it succeeded, so a failed request can be retried.
+        chatHistory.push({ role: "user", content: message });
+        chatHistory.push({ role: "assistant", content: result.data.answer });
         print(result.data.answer);
         handleStatus(result.data.status);
       })
