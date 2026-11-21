@@ -2,13 +2,22 @@
 
 import logging
 import os
+import time
 
+import httpx
 from google import genai
 from google.genai import errors, types
 
 from modules.text_formatter import parse_status
 
 logger = logging.getLogger(__name__)
+
+# Time limits (seconds). Vercel kills a request after 60s (vercel.json), so
+# narrator + status check together must finish well inside that.
+PER_CALL_TIMEOUT_S = 20  # one model call
+NARRATOR_BUDGET_S = 38  # all narrator attempts, including fallbacks
+STATUS_BUDGET_S = 12  # all status-check attempts; on failure the turn still counts
+MIN_ATTEMPT_S = 3  # don't start a call with less time than this left
 
 _client = None
 
@@ -49,16 +58,31 @@ def _build_request(model: str, system_prompt: str, messages: list):
     return contents, config
 
 
-def _generate(models: list, system_prompt: str, messages: list, temperature=None) -> str:
-    """Try each model in order; move on if one fails (rate limit, overload, etc.)."""
+def _generate(models: list, system_prompt: str, messages: list, budget_s: float, temperature=None) -> str:
+    """Try each model in order; move on if one fails, hangs or is overloaded.
+
+    Each call gets a timeout and the SDK's own retries are turned off, so a
+    hung or overloaded model can't eat the whole request. On Vercel a request
+    is killed after maxDuration (60s), so all attempts together stay within
+    `budget_s` seconds.
+    """
     if not models:
         raise RuntimeError("No models configured")
 
+    deadline = time.monotonic() + budget_s
     last_error = None
     for model in models:
+        remaining = deadline - time.monotonic()
+        if remaining < MIN_ATTEMPT_S:
+            logger.warning("Out of time before trying %s", model)
+            break
         contents, config = _build_request(model, system_prompt, messages)
         if temperature is not None:
             config.temperature = temperature
+        config.http_options = types.HttpOptions(
+            timeout=int(min(remaining, PER_CALL_TIMEOUT_S) * 1000),
+            retry_options=types.HttpRetryOptions(attempts=1),
+        )
         try:
             response = get_client().models.generate_content(model=model, contents=contents, config=config)
             text = (response.text or "").strip()
@@ -69,20 +93,25 @@ def _generate(models: list, system_prompt: str, messages: list, temperature=None
         except errors.APIError as exc:
             last_error = exc
             logger.warning("%s failed (%s), trying next model", model, exc.code)
-    raise last_error
+        except httpx.HTTPError as exc:  # timeouts and connection errors
+            last_error = exc
+            logger.warning("%s failed (%s), trying next model", model, type(exc).__name__)
+    raise last_error or RuntimeError("No time left to call a model")
 
 
 def generate_reply(history: list, models: list) -> str:
     """Get the narrator's next line from the chat history."""
     system_prompt = "\n".join(m["content"] for m in history if m["role"] == "system")
     turns = [m for m in history if m["role"] != "system"]
-    return _generate(models, system_prompt, turns)
+    return _generate(models, system_prompt, turns, budget_s=NARRATOR_BUDGET_S)
 
 
 def classify_status(status_prompt: str, reply: str, models: list) -> str:
     """Return DEAD, WON or UNKNOWN for the narrator's latest reply."""
     try:
-        raw = _generate(models, status_prompt, [{"role": "user", "content": reply}], temperature=0)
+        raw = _generate(
+            models, status_prompt, [{"role": "user", "content": reply}], budget_s=STATUS_BUDGET_S, temperature=0
+        )
     except Exception:
         logger.exception("Status check failed, assuming UNKNOWN")
         return "UNKNOWN"
