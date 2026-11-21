@@ -11,14 +11,34 @@ from modules.conversation import trim_history
 from modules.llm import classify_status, generate_reply
 from modules.text_formatter import format_reply
 
-app = Flask(__name__)
+# Static files live in public/static so Vercel can serve them from its CDN.
+# Locally, Flask serves the same folder at the same /static URLs.
+app = Flask(__name__, static_folder="public/static", static_url_path="/static")
+
+MAX_COMMAND_CHARS = 500
+MAX_HISTORY_MESSAGES = 60
+MAX_MESSAGE_CHARS = 4000
 
 
-def new_history() -> list:
-    return [{"role": "system", "content": NARRATOR_PROMPT}]
+def clean_history(raw) -> list:
+    """Validate the chat history the browser sends back.
 
-
-chat_history = new_history()
+    The server keeps no game state (serverless functions don't keep memory
+    between requests), so the browser holds the history and sends it with
+    every command. Only user/assistant turns are accepted; the system prompt
+    is always added here on the server.
+    """
+    if not isinstance(raw, list):
+        return []
+    history = []
+    for msg in raw[-MAX_HISTORY_MESSAGES:]:
+        if (
+            isinstance(msg, dict)
+            and msg.get("role") in ("user", "assistant")
+            and isinstance(msg.get("content"), str)
+        ):
+            history.append({"role": msg["role"], "content": msg["content"][:MAX_MESSAGE_CHARS]})
+    return history
 
 
 @app.route("/")
@@ -30,28 +50,24 @@ def home():
 @app.route("/terminal", methods=["GET", "POST"])
 def terminal():
     """GET renders the game terminal; POST processes a player command."""
-    global chat_history
-
     if request.method == "GET":
-        chat_history = new_history()  # fresh game on every page load
         return render_template("terminal.html")
 
-    try:
-        command = request.get_json(silent=True)["message"]
-    except (KeyError, TypeError):
-        logging.error("Invalid JSON data: %s", request.data)
+    data = request.get_json(silent=True)
+    command = data.get("message") if isinstance(data, dict) else None
+    if not isinstance(command, str) or not command.strip():
+        logging.error("Invalid JSON data: %s", request.data[:200])
         return jsonify({"error": "Invalid JSON data"}), 400
 
-    chat_history.append({"role": "user", "content": command})
-    chat_history = trim_history(chat_history, MAX_HISTORY_TOKENS)
+    history = clean_history(data.get("history"))
+    history.append({"role": "user", "content": command[:MAX_COMMAND_CHARS]})
+    chat = trim_history([{"role": "system", "content": NARRATOR_PROMPT}] + history, MAX_HISTORY_TOKENS)
 
     try:
-        reply = format_reply(generate_reply(chat_history, NARRATOR_MODELS))
-        chat_history.append({"role": "assistant", "content": reply})
+        reply = format_reply(generate_reply(chat, NARRATOR_MODELS))
         status = classify_status(STATUS_PROMPT, reply, STATUS_MODELS)
     except Exception:
-        logging.exception("Gemini request failed")
-        chat_history.pop()  # drop the unanswered command
+        logging.exception("AI request failed")
         return jsonify({"error": "The AI service is unavailable"}), 502
 
     logging.info("Player status: %s", status)

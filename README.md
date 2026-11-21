@@ -75,6 +75,16 @@ LLM_PROVIDER=lmstudio
 
 4. Run `python app.py` as usual. Set `LMSTUDIO_MODEL` only if you have more than one model loaded.
 
+## Deploying to Vercel
+
+The same code runs locally and on Vercel. The server keeps no game state: the browser holds the story so far and sends it with each command, which is what serverless functions need. Static files live in `public/static/`, so Vercel serves them from its CDN while Flask serves the same folder locally.
+
+1. Import this GitHub repo as a new project on [Vercel](https://vercel.com/new). It detects Flask from `app.py`; no build settings are needed.
+2. Under **Settings → Environment Variables**, add `GEMINI_API_KEY`. Optionally add `NARRATOR_MODELS` and `STATUS_MODELS`.
+3. Deploy. Every push to `main` redeploys automatically.
+
+`vercel.json` gives each request up to 60 seconds, and `.python-version` pins Python 3.12. Leave `LLM_PROVIDER` unset (Gemini) on Vercel, because it can't reach an LM Studio server on your laptop.
+
 ## How to Play
 
 - Type `help` for a list of available commands.
