@@ -75,6 +75,15 @@ LLM_PROVIDER=lmstudio
 
 4. Run `python app.py` as usual. Set `LMSTUDIO_MODEL` only if you have more than one model loaded.
 
+### Running the tests
+
+The tests replace the AI with a fake, so they run offline and use no API quota:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
 ## Deploying to Vercel
 
 The same code runs locally and on Vercel. The server keeps no game state: the browser holds the story so far and sends it with each command, which is what serverless functions need. Static files live in `public/static/`, so Vercel serves them from its CDN while Flask serves the same folder locally.
