@@ -9,7 +9,7 @@ logging.basicConfig(level=logging.INFO)  # before module imports so their startu
 from config import MAX_HISTORY_TOKENS, NARRATOR_MODELS, NARRATOR_PROMPT, STATUS_MODELS, STATUS_PROMPT
 from modules.conversation import trim_history
 from modules.llm import classify_status, generate_reply
-from modules.text_formatter import format_reply
+from modules.text_formatter import extract_status, format_reply
 
 # Static files live in public/static so Vercel can serve them from its CDN.
 # Locally, Flask serves the same folder at the same /static URLs.
@@ -64,8 +64,14 @@ def terminal():
     chat = trim_history([{"role": "system", "content": NARRATOR_PROMPT}] + history, MAX_HISTORY_TOKENS)
 
     try:
-        reply = format_reply(generate_reply(chat, NARRATOR_MODELS))
-        status = classify_status(STATUS_PROMPT, reply, STATUS_MODELS)
+        # The narrator tags its own reply with the player's status, so most
+        # turns need one AI call. Only if the tag is missing do we make a
+        # second, separate classifier call.
+        reply, status = extract_status(generate_reply(chat, NARRATOR_MODELS))
+        reply = format_reply(reply)
+        if status is None:
+            logging.info("Narrator left out the status tag; using the classifier")
+            status = classify_status(STATUS_PROMPT, reply, STATUS_MODELS)
     except Exception:
         logging.exception("AI request failed")
         return jsonify({"error": "The AI service is unavailable"}), 502
