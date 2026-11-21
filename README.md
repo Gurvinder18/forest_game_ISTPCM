@@ -8,6 +8,18 @@ A terminal-style text adventure built for the ISTPCM group assignment. You wake 
 - Old-school computer terminal look and feel
 - Open-ended gameplay: type anything, and the story reacts
 - Replies stream in word by word as the narrator writes them
+- Each run lasts 8 to 10 moves: on the final move you either escape or die, depending on how you've played
+- 3 rare easter eggs (5% chance each, never two in one run). The game tells you when you've found one
+
+<details>
+<summary>Easter egg spoilers</summary>
+
+- **Bigfoot to the rescue:** Bigfoot is glimpsed in the final moves, then carries you out of the forest.
+- **A friendly vampire from Hotel Transylvania:** an oddly polite vampire turns out to be the hotel's guest experience manager and guides you out.
+- **It was all a dream:** small things feel off near the end, then you wake up in your own bed.
+
+How it works: the server picks the run's length and egg when the game starts (`modules/runs.py`) and adds stage instructions to the narrator prompt each move. In egg runs the player can't die early, the egg is foreshadowed in the last 3 moves, and the final move always ends with it.
+</details>
 
 ## Technology Stack
 

@@ -55,6 +55,8 @@ body::after {
 
 .tagline { margin: 0; color: var(--dim); }
 
+.eggs-note { margin: 0; color: var(--win); }
+
 .menu-options { display: flex; flex-direction: column; gap: 8px; }
 
 .menu-item {
@@ -100,6 +102,11 @@ body::after {
 .line.error { color: var(--danger); }
 .line.dead { color: var(--danger); font-size: 1.4em; }
 .line.won { color: var(--win); font-size: 1.4em; }
+.line.egg {
+  color: var(--win);
+  border: 1px dashed var(--win);
+  padding: 6px 10px;
+}
 
 .input-line {
   display: flex;
