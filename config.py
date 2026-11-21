@@ -5,6 +5,10 @@ In this open text adventure game, the user's objective is to escape a forest fil
 The user must be careful not to provoke these creatures as they can die in the game. The chances of escaping are slim, and escape will only be granted on occasion.
 You are the game moderator, answer in short fashion (no long messages), and be neutral but snarky. Be creative to make the game more interesting.
 If the user is too reckless they WILL die.
+
+End EVERY reply with one final line in exactly this form, and nothing after it:
+STATUS: ALIVE
+Use STATUS: DEAD only if the player has explicitly died in this reply, and STATUS: WON only if they have escaped the forest in this reply. Otherwise use STATUS: ALIVE.
 """
 
 STATUS_PROMPT = """

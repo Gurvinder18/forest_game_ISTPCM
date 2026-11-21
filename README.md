@@ -13,7 +13,7 @@ A terminal-style text adventure built for the ISTPCM group assignment. You wake 
 - **Flask**: Python backend that serves the pages and relays player commands to the AI
 - **Plain CSS**: terminal styling and text formatting
 - **JavaScript**: terminal input, command history and async requests to the server
-- **Gemini via Google AI Studio**: `gemini-3.5-flash-lite` narrates the game and `gemini-3.1-flash-lite` checks whether the player has won or died. If a model is rate-limited or overloaded, the app falls back to the next one (including `gemma-4-31b-it`), so the free tier gives roughly 500 turns a day
+- **Gemini via Google AI Studio**: `gemini-3.5-flash-lite` narrates the game and ends each reply with a hidden `STATUS:` line saying whether the player is alive, dead or has escaped, so most turns take a single AI call. If that line is missing, a separate check on `gemini-3.1-flash-lite` decides instead. If a model is rate-limited or overloaded, the app falls back to the next one (including `gemma-4-31b-it`)
 
 ## Installation
 

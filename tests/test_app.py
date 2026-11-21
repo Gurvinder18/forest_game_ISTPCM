@@ -5,7 +5,7 @@ import pytest
 
 import app as game
 from modules.conversation import trim_history
-from modules.text_formatter import format_reply, parse_status
+from modules.text_formatter import extract_status, format_reply, parse_status
 
 
 # ---- helpers ---------------------------------------------------------------
@@ -38,6 +38,37 @@ def test_format_reply_strips_markdown():
 )
 def test_parse_status(raw, expected):
     assert parse_status(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "raw, expected_status",
+    [
+        ("Fog everywhere.\nSTATUS: ALIVE", "UNKNOWN"),
+        ("The vampire feeds. You die.\n\nSTATUS: DEAD", "DEAD"),
+        ("You reach the road!\n**Status:** won", "WON"),
+        ("Close call.\n[STATUS: ALIVE]\n", "UNKNOWN"),
+        ("Hmm.\nStatus - dead.", "DEAD"),
+    ],
+)
+def test_extract_status_reads_and_strips_tag(raw, expected_status):
+    reply, status = extract_status(raw)
+    assert status == expected_status
+    assert "status" not in reply.lower()
+    assert reply
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "No tag at all.",
+        "STATUS: DEAD was scrawled on a tree.\nYou keep walking.",  # tag not on the last line
+        "",
+    ],
+)
+def test_extract_status_missing_tag_returns_none(raw):
+    reply, status = extract_status(raw)
+    assert status is None
+    assert reply == raw
 
 
 # ---- routes ----------------------------------------------------------------
@@ -89,6 +120,22 @@ def test_bad_requests_return_400(client, body):
 
 def test_non_json_returns_400(client):
     assert client.post("/terminal", data="not json").status_code == 400
+
+
+def test_tagged_reply_skips_classifier(client, monkeypatch):
+    classifier_calls = []
+    monkeypatch.setattr(game, "generate_reply", lambda chat, models: "The wolf wins.\nSTATUS: DEAD")
+    monkeypatch.setattr(game, "classify_status", lambda *a: classifier_calls.append(a) or "UNKNOWN")
+    data = client.post("/terminal", json={"message": "pet the wolf"}).get_json()
+    assert data == {"answer": "The wolf wins.", "status": "DEAD"}
+    assert classifier_calls == []  # one AI call for the whole turn
+
+
+def test_untagged_reply_falls_back_to_classifier(client, monkeypatch):
+    monkeypatch.setattr(game, "generate_reply", lambda chat, models: "You escape onto the highway!")
+    monkeypatch.setattr(game, "classify_status", lambda prompt, reply, models: "WON")
+    data = client.post("/terminal", json={"message": "run"}).get_json()
+    assert data == {"answer": "You escape onto the highway!", "status": "WON"}
 
 
 def test_ai_failure_returns_502(client, monkeypatch):
