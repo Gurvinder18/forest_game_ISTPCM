@@ -110,6 +110,48 @@ def generate_reply(history: list, models: list) -> str:
     return _generate(models, system_prompt, turns, budget_s=NARRATOR_BUDGET_S)
 
 
+def stream_reply(history: list, models: list):
+    """Yield the narrator's reply in pieces as Gemini writes it.
+
+    Falls back to the next model only if the current one fails before sending
+    any text; once text has gone out, a failure is raised to the caller.
+    """
+    if not models:
+        raise RuntimeError("No models configured")
+    system_prompt = "\n".join(m["content"] for m in history if m["role"] == "system")
+    turns = [m for m in history if m["role"] != "system"]
+
+    deadline = time.monotonic() + NARRATOR_BUDGET_S
+    last_error = None
+    for model in models:
+        remaining = deadline - time.monotonic()
+        if remaining < MIN_ATTEMPT_S:
+            logger.warning("Out of time before trying %s", model)
+            break
+        contents, config = _build_request(model, system_prompt, turns)
+        config.http_options = types.HttpOptions(
+            timeout=int(min(remaining, PER_CALL_TIMEOUT_S) * 1000),
+            retry_options=types.HttpRetryOptions(attempts=1),
+        )
+        sent_any = False
+        try:
+            for chunk in get_client().models.generate_content_stream(model=model, contents=contents, config=config):
+                text = chunk.text
+                if text:
+                    sent_any = True
+                    yield text
+            if sent_any:
+                return
+            last_error = RuntimeError(f"{model} returned an empty response")
+            logger.warning("%s returned an empty response, trying next model", model)
+        except (errors.APIError, httpx.HTTPError) as exc:
+            if sent_any:
+                raise
+            last_error = exc
+            logger.warning("%s failed (%s), trying next model", model, getattr(exc, "code", type(exc).__name__))
+    raise last_error or RuntimeError("No time left to call a model")
+
+
 def classify_status(status_prompt: str, reply: str, models: list) -> str:
     """Return DEAD, WON or UNKNOWN for the narrator's latest reply."""
     try:

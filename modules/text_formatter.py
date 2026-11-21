@@ -31,6 +31,61 @@ def extract_status(text: str):
     return text[: last.start()].rstrip(), status
 
 
+class StreamStatusFilter:
+    """Hides the narrator's STATUS line while a reply is being streamed.
+
+    Text is passed through as it arrives, except a line that might turn out to
+    be the status line: that is held back until it's complete, then dropped if
+    it is one. The final reply sent at the end of the stream (from
+    extract_status) is what the player keeps; this only keeps the live view
+    clean.
+    """
+
+    _LEAD = re.compile(r"^[^\w\n]*")
+
+    def __init__(self):
+        self._line = ""  # current line, not yet shown
+        self._line_shown = False  # current line already passed through
+        self._held_status = ""  # a complete status line, shown only if more text follows
+
+    def _could_be_status(self, line: str) -> bool:
+        word = self._LEAD.sub("", line).lower()
+        return word[:6] == "status"[: len(word[:6])]
+
+    def _emit(self, out: list, text: str):
+        if self._held_status and text.strip():
+            out.append(self._held_status)  # it wasn't the last line after all
+            self._held_status = ""
+        out.append(text)
+
+    def feed(self, chunk: str) -> str:
+        out = []
+        for ch in chunk:
+            if ch == "\n":
+                if self._line_shown:
+                    out.append("\n")
+                elif _STATUS_LINE.fullmatch(self._line.strip()):
+                    self._held_status = self._line + "\n"
+                else:
+                    self._emit(out, self._line + "\n")
+                self._line, self._line_shown = "", False
+            elif self._line_shown:
+                out.append(ch)
+            else:
+                self._line += ch
+                if not self._could_be_status(self._line):
+                    self._emit(out, self._line)
+                    self._line_shown = True
+        return "".join(out)
+
+    def finish(self) -> str:
+        out = []
+        if not self._line_shown and self._line and not _STATUS_LINE.fullmatch(self._line.strip()):
+            self._emit(out, self._line)
+        self._line, self._line_shown = "", False
+        return "".join(out)
+
+
 def parse_status(raw: str) -> str:
     """Map a classifier answer to DEAD, WON or UNKNOWN."""
     raw = (raw or "").upper()

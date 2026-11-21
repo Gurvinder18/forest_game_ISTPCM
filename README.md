@@ -7,6 +7,7 @@ A terminal-style text adventure built for the ISTPCM group assignment. You wake 
 - AI narrator and win/lose detection powered by Gemini (Google AI Studio)
 - Old-school computer terminal look and feel
 - Open-ended gameplay: type anything, and the story reacts
+- Replies stream in word by word as the narrator writes them
 
 ## Technology Stack
 
@@ -75,6 +76,8 @@ LLM_PROVIDER=lmstudio
 
 4. Run `python app.py` as usual. Set `LMSTUDIO_MODEL` only if you have more than one model loaded.
 
+With LM Studio the narrator writes longer, more atmospheric replies (4 to 6 sentences), since there's no quota to save. Replies stream in as they're written, so the first words show up within a few seconds even on a slow CPU. Set `NARRATOR_LENGTH=short` in `.env` if you prefer the short Gemini-style replies.
+
 ### Running the tests
 
 The tests replace the AI with a fake, so they run offline and use no API quota:
@@ -92,7 +95,7 @@ The same code runs locally and on Vercel. The server keeps no game state: the br
 2. Under **Settings → Environment Variables**, add `GEMINI_API_KEY`. Optionally add `NARRATOR_MODELS` and `STATUS_MODELS`.
 3. Deploy. Every push to `main` redeploys automatically.
 
-`vercel.json` gives each request up to 60 seconds, and `.python-version` pins Python 3.12. Leave `LLM_PROVIDER` unset (Gemini) on Vercel, because it can't reach an LM Studio server on your laptop.
+`vercel.json` gives each request up to 60 seconds, and `.python-version` pins Python 3.12. Leave `LLM_PROVIDER` unset (Gemini) on Vercel, because it can't reach an LM Studio server on your laptop. Replies there are short by default; add `NARRATOR_LENGTH=long` in Vercel's environment variables if you want longer ones (more tokens per turn, same number of requests).
 
 ## How to Play
 

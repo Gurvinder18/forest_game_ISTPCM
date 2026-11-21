@@ -1,9 +1,27 @@
 import os
 
-NARRATOR_PROMPT = """
+# How long the narrator's replies are: "short" or "long". Defaults to "long"
+# with a local LM Studio model (no quota to save) and "short" with Gemini.
+NARRATOR_LENGTH = (
+    os.getenv("NARRATOR_LENGTH", "").strip().lower()
+    or ("long" if os.getenv("LLM_PROVIDER", "gemini").strip().lower() == "lmstudio" else "short")
+)
+
+_LENGTH_RULES = {
+    "short": "answer in short fashion (no long messages)",
+    "long": (
+        "write 4 to 6 vivid sentences per reply, in at most two short paragraphs, "
+        "with atmosphere and sensory detail (sounds, smells, what moves in the dark), "
+        "and end on a moment of tension or a choice"
+    ),
+}
+if NARRATOR_LENGTH not in _LENGTH_RULES:
+    raise RuntimeError(f"Unknown NARRATOR_LENGTH '{NARRATOR_LENGTH}'. Use 'short' or 'long'.")
+
+NARRATOR_PROMPT = f"""
 In this open text adventure game, the user's objective is to escape a forest filled with dangerous creatures such as vampires, hunters, and wild creatures.
 The user must be careful not to provoke these creatures as they can die in the game. The chances of escaping are slim, and escape will only be granted on occasion.
-You are the game moderator, answer in short fashion (no long messages), and be neutral but snarky. Be creative to make the game more interesting.
+You are the game moderator: {_LENGTH_RULES[NARRATOR_LENGTH]}, and be neutral but snarky. Be creative to make the game more interesting.
 If the user is too reckless they WILL die.
 
 End EVERY reply with one final line in exactly this form, and nothing after it:

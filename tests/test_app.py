@@ -1,6 +1,8 @@
 """Tests for the game server. The AI backend is replaced with a fake, so these
 run offline and use no API quota. Run with: python -m pytest"""
 
+import json
+
 import pytest
 
 import app as game
@@ -144,3 +146,95 @@ def test_ai_failure_returns_502(client, monkeypatch):
 
     monkeypatch.setattr(game, "generate_reply", broken)
     assert client.post("/terminal", json={"message": "hi"}).status_code == 502
+
+
+# ---- streaming -------------------------------------------------------------
+
+from modules.text_formatter import StreamStatusFilter  # noqa: E402
+
+
+def run_filter(pieces):
+    f = StreamStatusFilter()
+    return "".join(f.feed(p) for p in pieces) + f.finish()
+
+
+@pytest.mark.parametrize(
+    "pieces",
+    [
+        ["Fog rolls in.\n", "STATUS: ALIVE"],
+        ["Fog ", "rolls in.\nST", "ATUS", ": DE", "AD\n"],
+        ["Fog rolls in.\n\n**Status:** won"],
+        ["Fog rolls in.\n[STATUS: ALIVE]\n\n"],
+    ],
+)
+def test_stream_filter_hides_status_line(pieces):
+    shown = run_filter(pieces)
+    assert "status" not in shown.lower()
+    assert shown.startswith("Fog rolls in.")
+
+
+def test_stream_filter_passes_text_through_as_it_arrives():
+    f = StreamStatusFilter()
+    assert f.feed("The wolf ") == "The wolf "  # shown immediately, not held
+    assert f.feed("stares.") == "stares."
+
+
+def test_stream_filter_keeps_status_words_mid_story():
+    shown = run_filter(["Statues loom.\n", "STATUS: DEAD was carved here.\n", "You walk on."])
+    assert shown == "Statues loom.\nSTATUS: DEAD was carved here.\nYou walk on."
+
+
+def read_stream(response):
+    return [json.loads(line) for line in response.get_data(as_text=True).splitlines() if line.strip()]
+
+
+def test_stream_route_sends_chunks_then_done(client, monkeypatch):
+    monkeypatch.setattr(game, "stream_reply", lambda chat, models: iter(["The **wolf** ", "wins.\nSTA", "TUS: DEAD"]))
+    events = read_stream(client.post("/terminal/stream", json={"message": "pet the wolf"}))
+    chunks = "".join(e["text"] for e in events if e["type"] == "chunk")
+    assert "STATUS" not in chunks
+    assert events[-1] == {"type": "done", "answer": "The wolf wins.", "status": "DEAD"}
+
+
+def test_stream_route_reports_ai_failure(client, monkeypatch):
+    def broken(chat, models):
+        raise RuntimeError("down")
+        yield  # makes this a generator
+
+    monkeypatch.setattr(game, "stream_reply", broken)
+    events = read_stream(client.post("/terminal/stream", json={"message": "hi"}))
+    assert events == [{"type": "error", "error": "The AI service is unavailable"}]
+
+
+def test_stream_route_rejects_bad_request(client):
+    assert client.post("/terminal/stream", json={"message": ""}).status_code == 400
+
+
+# ---- reply length ----------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "env, expected",
+    [
+        ({"LLM_PROVIDER": "lmstudio"}, "long"),
+        ({"LLM_PROVIDER": "gemini"}, "short"),
+        ({}, "short"),
+        ({"LLM_PROVIDER": "gemini", "NARRATOR_LENGTH": "long"}, "long"),
+        ({"LLM_PROVIDER": "lmstudio", "NARRATOR_LENGTH": "short"}, "short"),
+    ],
+)
+def test_narrator_length_setting(monkeypatch, env, expected):
+    import importlib
+
+    import config
+
+    for key in ("LLM_PROVIDER", "NARRATOR_LENGTH"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    try:
+        reloaded = importlib.reload(config)
+        assert reloaded.NARRATOR_LENGTH == expected
+        assert ("4 to 6 vivid sentences" in reloaded.NARRATOR_PROMPT) == (expected == "long")
+    finally:
+        monkeypatch.undo()
+        importlib.reload(config)
