@@ -11,11 +11,14 @@ import re
 import urllib.error
 import urllib.request
 
+from config import NARRATOR_LENGTH
 from modules.text_formatter import parse_status
 
 logger = logging.getLogger(__name__)
 
 TIMEOUT_SECONDS = 180  # local models can be slow on the first request
+# Longer replies need room; the status line also counts toward this.
+NARRATOR_MAX_TOKENS = 600 if NARRATOR_LENGTH == "long" else 300
 
 
 def _base_url() -> str:
@@ -72,18 +75,21 @@ def _to_messages(system_prompt: str, turns: list) -> list:
     return messages
 
 
-def _chat(system_prompt: str, turns: list, temperature=0.8, max_tokens=300) -> str:
-    payload = {
+def _payload(system_prompt: str, turns: list, temperature: float, max_tokens: int, stream: bool) -> dict:
+    return {
         "model": _model(),
         "messages": _to_messages(system_prompt, turns),
         "temperature": temperature,
         "max_tokens": max_tokens,
         # Thinking models (e.g. Gemma 4) otherwise spend the whole token budget
-        # reasoning and return an empty reply. Short narration doesn't need it.
+        # reasoning and return an empty reply. Narration doesn't need it.
         "reasoning_effort": "none",
-        "stream": False,
+        "stream": stream,
     }
-    data = _request("/chat/completions", payload)
+
+
+def _chat(system_prompt: str, turns: list, temperature=0.8, max_tokens=NARRATOR_MAX_TOKENS) -> str:
+    data = _request("/chat/completions", _payload(system_prompt, turns, temperature, max_tokens, stream=False))
     text = data["choices"][0]["message"].get("content") or ""
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()  # drop reasoning if present
     if not text:
@@ -96,6 +102,48 @@ def generate_reply(history: list, models=None) -> str:
     system_prompt = "\n".join(m["content"] for m in history if m["role"] == "system")
     turns = [m for m in history if m["role"] != "system"]
     return _chat(system_prompt, turns)
+
+
+def stream_reply(history: list, models=None):
+    """Yield the narrator's reply in pieces as the local model writes it."""
+    system_prompt = "\n".join(m["content"] for m in history if m["role"] == "system")
+    turns = [m for m in history if m["role"] != "system"]
+    payload = _payload(system_prompt, turns, 0.8, NARRATOR_MAX_TOKENS, stream=True)
+
+    req = urllib.request.Request(
+        f"{_base_url()}/chat/completions",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        res = urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS)
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")[:300]
+        raise RuntimeError(f"LM Studio returned {exc.code}: {body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            f"Can't reach LM Studio at {_base_url()}. Start the server in LM Studio's Developer tab and load a model."
+        ) from exc
+
+    sent_any = False
+    with res:
+        for raw_line in res:  # server-sent events: "data: {...}" lines
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line.startswith("data:"):
+                continue
+            data = line[len("data:"):].strip()
+            if data == "[DONE]":
+                break
+            try:
+                delta = json.loads(data)["choices"][0].get("delta", {})
+            except (ValueError, KeyError, IndexError):
+                continue
+            text = delta.get("content")
+            if text:
+                sent_any = True
+                yield text
+    if not sent_any:
+        raise RuntimeError("LM Studio returned an empty response")
 
 
 def classify_status(status_prompt: str, reply: str, models=None) -> str:

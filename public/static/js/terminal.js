@@ -40,34 +40,96 @@
     if (!value) input.focus();
   }
 
+  // Light markdown cleanup for text that's still streaming in. The server
+  // sends the fully cleaned reply at the end, which replaces this.
+  function liveClean(text) {
+    return text.replace(/\*\*|__/g, "").replace(/^#{1,6}\s*/gm, "");
+  }
+
+  // Reads the server's newline-delimited JSON stream, calling onEvent for
+  // each line as it arrives. Works even if the host delivers it all at once.
+  function readEvents(res, onEvent) {
+    var decoder = new TextDecoder();
+    var buffer = "";
+
+    function handleLines(final) {
+      var lines = buffer.split("\n");
+      buffer = final ? "" : lines.pop();
+      lines.forEach(function (line) {
+        if (line.trim()) onEvent(JSON.parse(line));
+      });
+    }
+
+    if (!res.body || !res.body.getReader) {
+      return res.text().then(function (text) { buffer = text; handleLines(true); });
+    }
+    var reader = res.body.getReader();
+    function pump() {
+      return reader.read().then(function (step) {
+        if (step.done) { handleLines(true); return; }
+        buffer += decoder.decode(step.value, { stream: true });
+        handleLines(false);
+        return pump();
+      });
+    }
+    return pump();
+  }
+
   function sendToNarrator(message, onSuccess) {
     setBusy(true);
     var thinking = print("The forest stirs", "system thinking");
+    var replyLine = null;
+    var streamed = "";
+    var finished = false;
 
-    fetch(window.TERMINAL_URL, {
+    function showReply(text) {
+      if (!replyLine) {
+        thinking.remove();
+        replyLine = print("");
+      }
+      replyLine.textContent = text;
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function fail(text) {
+      finished = true;
+      thinking.remove();
+      if (replyLine) replyLine.remove();
+      print("Error: " + text + ". Try again.", "error");
+    }
+
+    function onEvent(event) {
+      if (event.type === "chunk") {
+        streamed += event.text;
+        showReply(liveClean(streamed));
+      } else if (event.type === "done") {
+        finished = true;
+        showReply(event.answer);
+        // Only record the turn once it succeeded, so a failed request can be retried.
+        chatHistory.push({ role: "user", content: message });
+        chatHistory.push({ role: "assistant", content: event.answer });
+        if (onSuccess) onSuccess();
+        handleStatus(event.status);
+      } else if (event.type === "error") {
+        fail(event.error || "something went wrong");
+      }
+    }
+
+    fetch(window.STREAM_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message: message, history: chatHistory })
     })
       .then(function (res) {
-        return res.json().then(function (data) { return { ok: res.ok, data: data }; });
-      })
-      .then(function (result) {
-        thinking.remove();
-        if (!result.ok) {
-          print("Error: " + (result.data.error || "something went wrong") + ". Try again.", "error");
-          return;
+        if (!res.ok) {
+          return res.json().then(function (data) { fail(data.error || "something went wrong"); });
         }
-        // Only record the turn once it succeeded, so a failed request can be retried.
-        chatHistory.push({ role: "user", content: message });
-        chatHistory.push({ role: "assistant", content: result.data.answer });
-        if (onSuccess) onSuccess();
-        print(result.data.answer);
-        handleStatus(result.data.status);
+        return readEvents(res, onEvent).then(function () {
+          if (!finished) fail("the connection dropped before the reply finished");
+        });
       })
       .catch(function () {
-        thinking.remove();
-        print("Error: could not reach the server. Try again.", "error");
+        if (!finished) fail("could not reach the server");
       })
       .finally(function () {
         setBusy(false);
