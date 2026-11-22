@@ -405,6 +405,6 @@ def test_choice_labels_follow_shares_and_are_repeatable():
 def test_stage_instructions_pass_choice_labels():
     run = {"max_moves": 9, "egg": None}
     labels = ["BAD", "GOOD", "BAD", "NEUTRAL"]
-    assert "A) BAD, B) GOOD, C) BAD, D) NEUTRAL" in runs.stage_instructions(run, 0, next_labels=labels)
+    assert "first BAD, second GOOD, third BAD, fourth NEUTRAL" in runs.stage_instructions(run, 0, next_labels=labels)
     text = runs.stage_instructions(run, 3, prev_labels=labels)
-    assert "offered last time were secretly: A) BAD, B) GOOD" in text
+    assert "were secretly: first BAD, second GOOD" in text

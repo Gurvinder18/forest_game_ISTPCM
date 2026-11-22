@@ -21,7 +21,7 @@ ESCAPE_CHANCE = 0.4
 
 # Hidden quality of each A-D option the narrator offers, drawn per option.
 CHOICE_SHARES = {"BAD": 0.60, "NEUTRAL": 0.25, "GOOD": 0.15}
-CHOICE_LETTERS = "ABCD"
+NUM_CHOICES = 4
 _DECISION_TAG = re.compile(r"\[\s*Decision\s*:\s*(GOOD|NEUTRAL|BAD)\b", re.IGNORECASE)
 
 EASTER_EGGS = {
@@ -110,11 +110,12 @@ def choice_labels(run: dict, commands) -> list:
     key = json.dumps([run["max_moves"], run["egg"], list(commands)])
     rng = random.Random(hashlib.sha256(key.encode("utf-8")).hexdigest())
     ratings, weights = zip(*CHOICE_SHARES.items())
-    return rng.choices(ratings, weights=weights, k=len(CHOICE_LETTERS))
+    return rng.choices(ratings, weights=weights, k=NUM_CHOICES)
 
 
 def _labelled(labels) -> str:
-    return ", ".join(f"{letter}) {label}" for letter, label in zip(CHOICE_LETTERS, labels))
+    names = ["first", "second", "third", "fourth"]
+    return ", ".join(f"{name} {label}" for name, label in zip(names, labels))
 
 
 def decision_score(tally: dict) -> int:
@@ -156,8 +157,9 @@ def stage_instructions(run: dict, move: int, tally=None, fate=None, prev_labels=
     left = max_moves - move
 
     offer = (
-        f"SECRET quality of the 4 choices you offer at the end of this reply, in order: {_labelled(next_labels)}. "
-        "Write each option to match its quality (BAD ones should still look tempting), and never reveal the labels."
+        f"SECRET quality of the 4 courses of action you weave into the end of this reply, in the order they appear: "
+        f"{_labelled(next_labels)}. Write each to match its quality (BAD ones should still look tempting), "
+        "and never reveal the labels."
         if next_labels else ""
     )
 
@@ -167,8 +169,9 @@ def stage_instructions(run: dict, move: int, tally=None, fate=None, prev_labels=
     lines = [f"This is the player's move {move} of {max_moves}.", RATING_RULES]
     if prev_labels:
         lines.append(
-            f"The choices you offered last time were secretly: {_labelled(prev_labels)}. If the player picked one "
-            "of them, rate their decision with exactly that label; if they typed their own action, rate it yourself."
+            f"The courses of action you offered last time, in the order they appeared, were secretly: "
+            f"{_labelled(prev_labels)}. If the player chose one of them, rate their decision with exactly that "
+            "label; if they did something else, rate it yourself."
         )
     if tally is not None:
         lines.append(
