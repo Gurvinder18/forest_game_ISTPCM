@@ -9,7 +9,6 @@ import app as game
 from modules.conversation import trim_history
 from modules.text_formatter import extract_status, format_reply, parse_status
 
-
 # ---- helpers ---------------------------------------------------------------
 
 def test_trim_history_keeps_system_prompt_and_latest_message():
@@ -157,7 +156,7 @@ def test_ai_failure_returns_502(client, monkeypatch):
 
 # ---- streaming -------------------------------------------------------------
 
-from modules.text_formatter import StreamStatusFilter  # noqa: E402
+from modules.text_formatter import StreamStatusFilter
 
 
 def run_filter(pieces):
@@ -251,7 +250,7 @@ def test_narrator_length_setting(monkeypatch, env, expected):
 
 # ---- run limits and easter eggs --------------------------------------------
 
-from modules import runs  # noqa: E402
+from modules import runs
 
 
 class FixedRandom:

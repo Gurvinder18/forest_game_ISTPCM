@@ -7,16 +7,34 @@ from flask import Flask, Response, jsonify, render_template, request
 load_dotenv(override=True)  # must run before config reads model overrides; override so edits to .env win on reload
 logging.basicConfig(level=logging.INFO)  # before module imports so their startup logs show
 
-from config import MAX_HISTORY_TOKENS, NARRATOR_LENGTH, NARRATOR_MODELS, NARRATOR_PROMPT, STATUS_MODELS, STATUS_PROMPT
+from config import (
+    MAX_HISTORY_TOKENS,
+    NARRATOR_LENGTH,
+    NARRATOR_MODELS,
+    NARRATOR_PROMPT,
+    STATUS_MODELS,
+    STATUS_PROMPT,
+)
 from modules.conversation import trim_history
 from modules.llm import classify_status, generate_reply, stream_reply
-from modules.runs import choice_labels, decision_tally, final_status, new_run, revealed_egg, roll_fate, stage_instructions, validate_run
+from modules.runs import (
+    choice_labels,
+    decision_tally,
+    final_status,
+    new_run,
+    revealed_egg,
+    roll_fate,
+    stage_instructions,
+    validate_run,
+)
 from modules.text_formatter import StreamStatusFilter, extract_status, format_reply
+
+logger = logging.getLogger(__name__)
 
 # Static files live in public/static so Vercel can serve them from its CDN.
 # Locally, Flask serves the same folder at the same /static URLs.
 app = Flask(__name__, static_folder="public/static", static_url_path="/static")
-logging.info("Narrator reply length: %s", NARRATOR_LENGTH)
+logger.info("Narrator reply length: %s", NARRATOR_LENGTH)
 
 MAX_COMMAND_CHARS = 500
 MAX_HISTORY_MESSAGES = 60
@@ -53,7 +71,7 @@ def build_turn():
     data = request.get_json(silent=True)
     command = data.get("message") if isinstance(data, dict) else None
     if not isinstance(command, str) or not command.strip():
-        logging.error("Invalid JSON data: %s", request.data[:200])
+        logger.error("Invalid JSON data: %s", request.data[:200])
         return None, (jsonify({"error": "Invalid JSON data"}), 400)
 
     history = clean_history(data.get("history"))
@@ -90,11 +108,11 @@ def finish_reply(raw_reply: str, turn: dict) -> dict:
     reply, status = extract_status(raw_reply)
     reply = format_reply(reply)
     if status is None:
-        logging.info("Narrator left out the status tag; using the classifier")
+        logger.info("Narrator left out the status tag; using the classifier")
         status = classify_status(STATUS_PROMPT, reply, STATUS_MODELS)
     run, move = turn["run"], turn["move"]
     status = final_status(run, move, status, turn.get("fate"))
-    logging.info("Move %s/%s, player status: %s", move, run["max_moves"], status)
+    logger.info("Move %s/%s, player status: %s", move, run["max_moves"], status)
     return {
         "answer": reply,
         "status": status,
@@ -125,7 +143,7 @@ def terminal():
     try:
         result = finish_reply(generate_reply(turn["chat"], NARRATOR_MODELS), turn)
     except Exception:
-        logging.exception("AI request failed")
+        logger.exception("AI request failed")
         return jsonify({"error": "The AI service is unavailable"}), 502
 
     return jsonify(result)
@@ -161,7 +179,7 @@ def terminal_stream():
             result = finish_reply("".join(pieces), turn)
             yield json.dumps({"type": "done", **result}) + "\n"
         except Exception:
-            logging.exception("AI request failed")
+            logger.exception("AI request failed")
             yield json.dumps({"type": "error", "error": "The AI service is unavailable"}) + "\n"
 
     return Response(
