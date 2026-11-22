@@ -387,3 +387,24 @@ def test_fate_is_tilted_towards_death():
     assert runs.roll_fate(run, 9, good, FixedRng(0.9)) == "DEAD"  # unlucky
     assert runs.roll_fate(run, 9, {"GOOD": 3, "NEUTRAL": 0, "BAD": 3}, FixedRng(0.0)) == "DEAD"  # not earned
     assert runs.final_status(run, 9, "WON", "DEAD") == "DEAD"
+
+
+def test_choice_labels_follow_shares_and_are_repeatable():
+    run = {"max_moves": 9, "egg": None}
+    assert runs.choice_labels(run, ["start", "a"]) == runs.choice_labels(run, ["start", "a"])
+    counts = {"BAD": 0, "NEUTRAL": 0, "GOOD": 0}
+    for i in range(5000):
+        for label in runs.choice_labels(run, ["start", str(i)]):
+            counts[label] += 1
+    total = sum(counts.values())
+    assert abs(counts["BAD"] / total - 0.60) < 0.02
+    assert abs(counts["NEUTRAL"] / total - 0.25) < 0.02
+    assert abs(counts["GOOD"] / total - 0.15) < 0.02
+
+
+def test_stage_instructions_pass_choice_labels():
+    run = {"max_moves": 9, "egg": None}
+    labels = ["BAD", "GOOD", "BAD", "NEUTRAL"]
+    assert "A) BAD, B) GOOD, C) BAD, D) NEUTRAL" in runs.stage_instructions(run, 0, next_labels=labels)
+    text = runs.stage_instructions(run, 3, prev_labels=labels)
+    assert "offered last time were secretly: A) BAD, B) GOOD" in text

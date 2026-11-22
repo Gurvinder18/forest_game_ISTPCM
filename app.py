@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)  # before module imports so their startu
 from config import MAX_HISTORY_TOKENS, NARRATOR_LENGTH, NARRATOR_MODELS, NARRATOR_PROMPT, STATUS_MODELS, STATUS_PROMPT
 from modules.conversation import trim_history
 from modules.llm import classify_status, generate_reply, stream_reply
-from modules.runs import decision_tally, final_status, new_run, revealed_egg, roll_fate, stage_instructions, validate_run
+from modules.runs import choice_labels, decision_tally, final_status, new_run, revealed_egg, roll_fate, stage_instructions, validate_run
 from modules.text_formatter import StreamStatusFilter, extract_status, format_reply
 
 # Static files live in public/static so Vercel can serve them from its CDN.
@@ -71,7 +71,11 @@ def build_turn():
     history.append({"role": "user", "content": command[:MAX_COMMAND_CHARS]})
     tally = decision_tally(history)
     fate = roll_fate(run, move, tally)
-    system = f"{NARRATOR_PROMPT}\n\n{stage_instructions(run, move, tally, fate)}"
+    commands = [m["content"] for m in history if m["role"] == "user"]
+    prev_labels = choice_labels(run, commands[:-1]) if move > 0 else None
+    next_labels = choice_labels(run, commands) if move < run["max_moves"] else None
+    stage = stage_instructions(run, move, tally, fate, prev_labels, next_labels)
+    system = f"{NARRATOR_PROMPT}\n\n{stage}"
     chat = trim_history([{"role": "system", "content": system}] + history, MAX_HISTORY_TOKENS)
     return {"chat": chat, "run": run, "move": move, "fate": fate, "tally": tally}, None
 

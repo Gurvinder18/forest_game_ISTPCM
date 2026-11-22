@@ -4,6 +4,8 @@ The server is stateless, so the run is chosen when the game starts and the
 browser sends it back with every move. Anything it sends is re-validated here.
 """
 
+import hashlib
+import json
 import random
 import re
 
@@ -16,6 +18,10 @@ EGG_CHANCE = 0.05  # per easter egg; at most one egg per run
 # needs more GOOD than BAD decisions AND a lucky roll.
 DEATH_CHANCE = {"BAD": 0.45, "NEUTRAL": 0.15, "GOOD": 0.04}
 ESCAPE_CHANCE = 0.4
+
+# Hidden quality of each A-D option the narrator offers, drawn per option.
+CHOICE_SHARES = {"BAD": 0.60, "NEUTRAL": 0.25, "GOOD": 0.15}
+CHOICE_LETTERS = "ABCD"
 _DECISION_TAG = re.compile(r"\[\s*Decision\s*:\s*(GOOD|NEUTRAL|BAD)\b", re.IGNORECASE)
 
 EASTER_EGGS = {
@@ -95,6 +101,22 @@ def decision_tally(history) -> dict:
     return tally
 
 
+def choice_labels(run: dict, commands) -> list:
+    """The hidden BAD/NEUTRAL/GOOD label of each option offered after `commands`.
+
+    Seeded from the run and the player's commands so the next move can
+    recompute exactly which labels the previous options had.
+    """
+    key = json.dumps([run["max_moves"], run["egg"], list(commands)])
+    rng = random.Random(hashlib.sha256(key.encode("utf-8")).hexdigest())
+    ratings, weights = zip(*CHOICE_SHARES.items())
+    return rng.choices(ratings, weights=weights, k=len(CHOICE_LETTERS))
+
+
+def _labelled(labels) -> str:
+    return ", ".join(f"{letter}) {label}" for letter, label in zip(CHOICE_LETTERS, labels))
+
+
 def decision_score(tally: dict) -> int:
     return tally["GOOD"] - 2 * tally["BAD"]
 
@@ -123,7 +145,7 @@ RATING_RULES = (
 )
 
 
-def stage_instructions(run: dict, move: int, tally=None, fate=None) -> str:
+def stage_instructions(run: dict, move: int, tally=None, fate=None, prev_labels=None, next_labels=None) -> str:
     """Extra narrator instructions for this point in the run.
 
     Move 0 is the opening scene; moves 1..max_moves are the player's actions,
@@ -133,10 +155,21 @@ def stage_instructions(run: dict, move: int, tally=None, fate=None) -> str:
     egg = EASTER_EGGS.get(run["egg"])
     left = max_moves - move
 
+    offer = (
+        f"SECRET quality of the 4 choices you offer at the end of this reply, in order: {_labelled(next_labels)}. "
+        "Write each option to match its quality (BAD ones should still look tempting), and never reveal the labels."
+        if next_labels else ""
+    )
+
     if move == 0:
-        return "This is the opening scene. Set the scene and ask what the player does."
+        return "\n".join(filter(None, ["This is the opening scene. Set the scene and ask what the player does.", offer]))
 
     lines = [f"This is the player's move {move} of {max_moves}.", RATING_RULES]
+    if prev_labels:
+        lines.append(
+            f"The choices you offered last time were secretly: {_labelled(prev_labels)}. If the player picked one "
+            "of them, rate their decision with exactly that label; if they typed their own action, rate it yourself."
+        )
     if tally is not None:
         lines.append(
             f"Their decisions so far: {tally['GOOD']} good, {tally['NEUTRAL']} neutral, {tally['BAD']} bad "
@@ -186,6 +219,8 @@ def stage_instructions(run: dict, move: int, tally=None, fate=None) -> str:
             lines.append("Death comes easily here: reckless or careless players die.")
     if left == 1:
         lines.append("The next move is the last one: build toward a climax.")
+    if offer:
+        lines.append(offer)
     return "\n".join(lines)
 
 
