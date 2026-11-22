@@ -218,6 +218,78 @@ def test_stream_route_rejects_bad_request(client):
     assert client.post("/terminal/stream", json={"message": ""}).status_code == 400
 
 
+# ---- hidden decision ratings -----------------------------------------------
+
+from modules.text_formatter import StreamDecisionFilter, strip_decision
+
+
+@pytest.mark.parametrize(
+    "raw, rating",
+    [
+        ("[Decision: BAD]\nThe wolf hears you.", "BAD"),
+        ("**[Decision: good (+1)]** The wolf hears you.", "GOOD"),
+        ("  [ Decision : RECKLESS ]\n\nThe wolf hears you.", "RECKLESS"),
+        ("The wolf hears you.", None),
+    ],
+)
+def test_strip_decision_hides_the_rating(raw, rating):
+    reply, found = strip_decision(raw)
+    assert (reply, found) == ("The wolf hears you.", rating)
+
+
+def run_decision_filter(pieces):
+    f = StreamDecisionFilter()
+    return "".join(f.feed(p) for p in pieces) + f.finish()
+
+
+@pytest.mark.parametrize(
+    "pieces",
+    [
+        ["[Decision: BAD]\nThe wolf ", "hears you."],
+        ["[Dec", "ision: B", "AD]", "\n\nThe wolf hears you."],
+        ["**[Decision: NEUTRAL]** ", "The wolf hears you."],
+        ["The wolf ", "hears you."],
+        ["[Decision: GOOD]", "", "\n", "The wolf hears you."],
+    ],
+)
+def test_stream_decision_filter_hides_the_rating(pieces):
+    assert run_decision_filter(pieces) == "The wolf hears you."
+
+
+def test_stream_decision_filter_does_not_hold_normal_text():
+    f = StreamDecisionFilter()
+    assert f.feed("The wolf ") == "The wolf "
+
+
+def test_reply_hides_rating_but_history_keeps_it(client, monkeypatch):
+    monkeypatch.setattr(game, "generate_reply", lambda chat, models: "[Decision: BAD]\nThe wolf hears you.\nSTATUS: ALIVE")
+    history = [{"role": "user", "content": "start"}, {"role": "assistant", "content": "fog"}]
+    data = client.post("/terminal", json={"message": "howl", "history": history, "run": NORMAL_RUN}).get_json()
+    assert data["answer"] == "The wolf hears you."
+    assert data["memory"] == "[Decision: BAD]\nThe wolf hears you."
+    assert "decisions" not in data and "score" not in json.dumps(data).lower()
+
+
+def test_low_score_sends_a_warning(client, monkeypatch):
+    monkeypatch.setattr(game, "generate_reply", lambda chat, models: "[Decision: BAD]\nWorse.\nSTATUS: ALIVE")
+    history = [
+        {"role": "user", "content": "start"}, {"role": "assistant", "content": "fog"},
+        {"role": "user", "content": "shout"}, {"role": "assistant", "content": "[Decision: BAD]\nBad."},
+    ]
+    data = client.post("/terminal", json={"message": "shout more", "history": history, "run": NORMAL_RUN}).get_json()
+    assert data["omen"]["tone"] == "warning"
+
+
+def test_stream_route_hides_rating(client, monkeypatch):
+    pieces = ["[Decis", "ion: GOOD]\n", "You hide.\nSTATUS: ALIVE"]
+    monkeypatch.setattr(game, "stream_reply", lambda chat, models: iter(pieces))
+    history = [{"role": "user", "content": "start"}, {"role": "assistant", "content": "fog"}]
+    events = read_stream(client.post("/terminal/stream", json={"message": "hide", "history": history, "run": NORMAL_RUN}))
+    chunks = "".join(e["text"] for e in events if e["type"] == "chunk")
+    assert chunks.strip() == "You hide."
+    assert events[-1]["answer"] == "You hide." and events[-1]["memory"].startswith("[Decision: GOOD]")
+
+
 # ---- reply length ----------------------------------------------------------
 
 @pytest.mark.parametrize(
@@ -365,7 +437,8 @@ def test_decision_tally_counts_narrator_ratings():
         {"role": "assistant", "content": "**[Decision: good (+1)]** Nice."},
         {"role": "assistant", "content": "[Decision: NEUTRAL (0)] Meh."},
     ]
-    assert runs.decision_tally(history) == {"GOOD": 1, "NEUTRAL": 1, "BAD": 1}
+    history.append({"role": "assistant", "content": "[Decision: RECKLESS]\nSplat."})
+    assert runs.decision_tally(history) == {"GOOD": 1, "NEUTRAL": 1, "BAD": 1, "RECKLESS": 1}
 
 
 class FixedRng:
@@ -380,7 +453,7 @@ def test_fate_is_tilted_towards_death():
     run = {"max_moves": 9, "egg": None}
     assert runs.roll_fate(run, 0, {}) is None
     assert runs.roll_fate({"max_moves": 9, "egg": "bigfoot"}, 3, {}) is None
-    assert runs.roll_fate(run, 3, {}, FixedRng(0.3)) == {"BAD": True, "NEUTRAL": False, "GOOD": False}
+    assert runs.roll_fate(run, 5, {}, FixedRng(0.3)) == {"BAD": True, "NEUTRAL": False, "GOOD": False, "RECKLESS": True}
     good = {"GOOD": 4, "NEUTRAL": 2, "BAD": 2}
     assert runs.roll_fate(run, 9, good, FixedRng(0.1)) == "WON"
     assert runs.roll_fate(run, 9, good, FixedRng(0.9)) == "DEAD"  # unlucky
@@ -388,13 +461,67 @@ def test_fate_is_tilted_towards_death():
     assert runs.final_status(run, 9, "WON", "DEAD") == "DEAD"
 
 
+def test_early_moves_only_kill_reckless_players():
+    run = {"max_moves": 9, "egg": None}
+    for move in range(1, runs.GRACE_MOVES + 1):
+        fate = runs.roll_fate(run, move, {}, FixedRng(0.0))  # dice that would kill on anything
+        assert fate == {"BAD": False, "NEUTRAL": False, "GOOD": False, "RECKLESS": True}
+    assert "It is still early" in runs.stage_instructions(run, 2, fate=fate)
+    assert "It is still early" not in runs.stage_instructions(run, 5, fate=runs.roll_fate(run, 5, {}, FixedRng(0.9)))
+
+
+def test_deaths_must_be_explained():
+    run = {"max_moves": 9, "egg": None}
+    for move in (1, 5, 9):
+        assert "never come out of nowhere" in runs.stage_instructions(run, move)
+
+
+def test_most_runs_die_around_moves_5_to_7():
+    import random
+
+    rng = random.Random(1)
+    run = {"max_moves": 10, "egg": None}
+    death_moves = []
+    for _ in range(4000):
+        for move in range(1, 10):
+            fate = runs.roll_fate(run, move, {}, rng)
+            pick = rng.choices(list(runs.CHOICE_SHARES), weights=list(runs.CHOICE_SHARES.values()))[0]
+            if fate[pick]:
+                death_moves.append(move)
+                break
+    assert min(death_moves) == runs.GRACE_MOVES + 1  # no dice deaths during the grace moves
+    share = sum(5 <= m <= 7 for m in death_moves) / 4000
+    assert share > 0.6
+
+
+@pytest.mark.parametrize(
+    "before, after, tone",
+    [
+        ({"GOOD": 1}, {"GOOD": 2}, "info"),
+        ({"BAD": 1}, {"BAD": 2}, "warning"),
+        ({"BAD": 1}, {"BAD": 1, "RECKLESS": 1}, "warning"),
+        ({"GOOD": 2}, {"GOOD": 3}, None),  # already in the band: no repeat
+        ({"GOOD": 1}, {"GOOD": 1, "NEUTRAL": 1}, None),
+    ],
+)
+def test_omen_hints_without_revealing_the_score(before, after, tone):
+    hint = runs.omen(before, after)
+    assert (hint and hint["tone"]) == tone
+    if hint:
+        assert not any(ch.isdigit() for ch in hint["text"])
+
+
 def test_choice_labels_follow_shares_and_are_repeatable():
     run = {"max_moves": 9, "egg": None}
     assert runs.choice_labels(run, ["start", "a"]) == runs.choice_labels(run, ["start", "a"])
     counts = {"BAD": 0, "NEUTRAL": 0, "GOOD": 0}
+    sizes = set()
     for i in range(5000):
-        for label in runs.choice_labels(run, ["start", str(i)]):
+        labels = runs.choice_labels(run, ["start", str(i)])
+        sizes.add(len(labels))
+        for label in labels:
             counts[label] += 1
+    assert sizes == {2, 3}
     total = sum(counts.values())
     assert abs(counts["BAD"] / total - 0.60) < 0.02
     assert abs(counts["NEUTRAL"] / total - 0.25) < 0.02
@@ -403,7 +530,9 @@ def test_choice_labels_follow_shares_and_are_repeatable():
 
 def test_stage_instructions_pass_choice_labels():
     run = {"max_moves": 9, "egg": None}
-    labels = ["BAD", "GOOD", "BAD", "NEUTRAL"]
-    assert "first BAD, second GOOD, third BAD, fourth NEUTRAL" in runs.stage_instructions(run, 0, next_labels=labels)
+    labels = ["BAD", "GOOD", "BAD"]
+    opening = runs.stage_instructions(run, 0, next_labels=labels)
+    assert "exactly 3 courses" in opening and "first BAD, second GOOD, third BAD" in opening
+    assert "exactly 2 courses" in runs.stage_instructions(run, 0, next_labels=["GOOD", "BAD"])
     text = runs.stage_instructions(run, 3, prev_labels=labels)
     assert "were secretly: first BAD, second GOOD" in text

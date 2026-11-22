@@ -22,12 +22,19 @@ from modules.runs import (
     decision_tally,
     final_status,
     new_run,
+    omen,
     revealed_egg,
     roll_fate,
     stage_instructions,
     validate_run,
 )
-from modules.text_formatter import StreamStatusFilter, extract_status, format_reply
+from modules.text_formatter import (
+    StreamDecisionFilter,
+    StreamStatusFilter,
+    extract_status,
+    format_reply,
+    strip_decision,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,20 +113,29 @@ def finish_reply(raw_reply: str, turn: dict) -> dict:
     separate classifier call.
     """
     reply, status = extract_status(raw_reply)
+    reply, rating = strip_decision(reply)
     reply = format_reply(reply)
     if status is None:
         logger.info("Narrator left out the status tag; using the classifier")
         status = classify_status(STATUS_PROMPT, reply, STATUS_MODELS)
     run, move = turn["run"], turn["move"]
     status = final_status(run, move, status, turn.get("fate"))
-    logger.info("Move %s/%s, player status: %s", move, run["max_moves"], status)
+    logger.info("Move %s/%s, decision: %s, player status: %s", move, run["max_moves"], rating, status)
+
+    # The decision rating stays hidden from the player. The browser stores
+    # `memory` (the reply plus its rating) in the history it sends back, so the
+    # server can keep scoring the run, but it only ever shows `answer`.
+    rated = bool(rating) and move > 0
+    before = turn.get("tally") or {}
+    after = {**before, rating: before.get(rating, 0) + 1} if rated else before
     return {
         "answer": reply,
+        "memory": f"[Decision: {rating}]\n{reply}" if rated else reply,
         "status": status,
         "run": run,
         "move": move,
         "moves_left": run["max_moves"] - move,
-        "decisions": turn.get("tally"),
+        "omen": omen(before, after) if status == "UNKNOWN" and rated else None,
         "easter_egg": revealed_egg(run, move) if status != "DEAD" else None,
     }
 
@@ -166,14 +182,15 @@ def terminal_stream():
 
     def events():
         pieces = []
+        decision_filter = StreamDecisionFilter()
         status_filter = StreamStatusFilter()
         try:
             for piece in stream_reply(turn["chat"], NARRATOR_MODELS):
                 pieces.append(piece)
-                visible = status_filter.feed(piece)
+                visible = status_filter.feed(decision_filter.feed(piece))
                 if visible:
                     yield json.dumps({"type": "chunk", "text": visible}) + "\n"
-            visible = status_filter.finish()
+            visible = status_filter.feed(decision_filter.finish()) + status_filter.finish()
             if visible:
                 yield json.dumps({"type": "chunk", "text": visible}) + "\n"
             result = finish_reply("".join(pieces), turn)

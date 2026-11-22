@@ -111,7 +111,9 @@
         showReply(event.answer);
         // Only record the turn once it succeeded, so a failed request can be retried.
         chatHistory.push({ role: "user", content: message });
-        chatHistory.push({ role: "assistant", content: event.answer });
+        // `memory` carries the narrator's hidden decision rating so the server
+        // can keep scoring the run; only `answer` is ever shown.
+        chatHistory.push({ role: "assistant", content: event.memory || event.answer });
         run = event.run;  // chosen by the server on the opening move; sent back each move
         if (onSuccess) onSuccess();
         handleStatus(event);
@@ -164,6 +166,10 @@
       }
       print("Type 'restart' to " + (status === "DEAD" ? "try again." : "play again."), "system");
       return;
+    }
+
+    if (event.omen) {
+      print("[ " + event.omen.text + " ]", event.omen.tone === "info" ? "omen-good" : "omen-bad");
     }
 
     if (event.moves_left === 1) {
