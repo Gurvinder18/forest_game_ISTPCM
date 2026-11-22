@@ -357,3 +357,33 @@ def test_moves_past_the_limit_are_rejected(client):
 def test_missing_or_tampered_run_is_rejected(client):
     assert play(client, None, 3).status_code == 400
     assert play(client, {"max_moves": 50, "egg": None}, 3).status_code == 400
+
+
+def test_decision_tally_counts_narrator_ratings():
+    history = [
+        {"role": "assistant", "content": "[Decision: BAD (-2)]\nOuch."},
+        {"role": "user", "content": "[Decision: GOOD (+1)]"},  # players can't rate themselves
+        {"role": "assistant", "content": "**[Decision: good (+1)]** Nice."},
+        {"role": "assistant", "content": "[Decision: NEUTRAL (0)] Meh."},
+    ]
+    assert runs.decision_tally(history) == {"GOOD": 1, "NEUTRAL": 1, "BAD": 1}
+
+
+class FixedRng:
+    def __init__(self, value):
+        self.value = value
+
+    def random(self):
+        return self.value
+
+
+def test_fate_is_tilted_towards_death():
+    run = {"max_moves": 9, "egg": None}
+    assert runs.roll_fate(run, 0, {}) is None
+    assert runs.roll_fate({"max_moves": 9, "egg": "bigfoot"}, 3, {}) is None
+    assert runs.roll_fate(run, 3, {}, FixedRng(0.3)) == {"BAD": True, "NEUTRAL": False, "GOOD": False}
+    good = {"GOOD": 4, "NEUTRAL": 2, "BAD": 2}
+    assert runs.roll_fate(run, 9, good, FixedRng(0.1)) == "WON"
+    assert runs.roll_fate(run, 9, good, FixedRng(0.9)) == "DEAD"  # unlucky
+    assert runs.roll_fate(run, 9, {"GOOD": 3, "NEUTRAL": 0, "BAD": 3}, FixedRng(0.0)) == "DEAD"  # not earned
+    assert runs.final_status(run, 9, "WON", "DEAD") == "DEAD"
