@@ -85,6 +85,78 @@ class StreamStatusFilter:
         return "".join(out)
 
 
+_DECISION_LINE = r"[*_]*\[\s*Decision\s*:\s*(GOOD|NEUTRAL|BAD|RECKLESS)\b[^\]\n]*\][*_]*[ \t]*\n?"
+_DECISION_ANYWHERE = re.compile(_DECISION_LINE, re.IGNORECASE)
+_DECISION_AT_START = re.compile(r"\s*" + _DECISION_LINE, re.IGNORECASE)
+
+
+def strip_decision(text: str):
+    """Split the narrator's hidden '[Decision: ...]' rating off its reply.
+
+    Returns (reply_without_rating, rating), where rating is GOOD, NEUTRAL,
+    BAD, RECKLESS or None. The rating is kept server-side; the player never
+    sees it.
+    """
+    if not text:
+        return text, None
+    match = _DECISION_ANYWHERE.search(text)
+    if not match:
+        return text, None
+    return _DECISION_ANYWHERE.sub("", text).strip(), match.group(1).upper()
+
+
+class StreamDecisionFilter:
+    """Hides the narrator's leading '[Decision: ...]' line while streaming.
+
+    The start of the reply is held back only until it's clear whether it is a
+    rating tag; everything after that passes straight through.
+    """
+
+    _TAG_START = "[decision:"
+
+    def __init__(self):
+        self._buf = ""
+        self._done = False
+        self._skip_blank = False  # drop blank lines right after a removed tag
+
+    def _pass(self, text: str) -> str:
+        if self._skip_blank:
+            stripped = text.lstrip()
+            if not stripped:
+                return ""
+            self._skip_blank = False
+            return stripped
+        return text
+
+    def _resolve(self, final: bool) -> str:
+        match = _DECISION_AT_START.match(self._buf)
+        if match and (final or match.group(0).endswith("\n") or self._buf[match.end():]):
+            self._done, self._skip_blank = True, True
+            rest, self._buf = self._buf[match.end():], ""
+            return self._pass(rest)
+        compact = re.sub(r"[\s*_]", "", self._buf).lower()
+        prefix = compact[: len(self._TAG_START)]
+        maybe_tag = self._TAG_START.startswith(prefix) and "]" not in compact
+        if not final and maybe_tag and len(self._buf) < 80:
+            return ""  # might still be a tag: wait for more
+        if not final and match:
+            return ""  # complete tag, waiting to see what follows it
+        self._done = True
+        out, self._buf = self._buf, ""
+        return out
+
+    def feed(self, chunk: str) -> str:
+        if self._done:
+            return self._pass(chunk)
+        self._buf += chunk
+        return self._resolve(final=False)
+
+    def finish(self) -> str:
+        if self._done:
+            return ""
+        return self._resolve(final=True)
+
+
 def parse_status(raw: str) -> str:
     """Map a classifier answer to DEAD, WON or UNKNOWN."""
     raw = (raw or "").upper()

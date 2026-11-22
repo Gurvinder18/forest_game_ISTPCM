@@ -9,6 +9,8 @@ A terminal-style text adventure built for the ISTPCM group assignment. You wake 
 - Open-ended gameplay: type anything, and the story reacts
 - Replies stream in word by word as the narrator writes them
 - Each run lasts 8 to 10 moves: on the final move you either escape or die, depending on how you've played
+- Each scene hides 2 or 3 possible actions in the narration. Every decision is secretly rated; you never see the score, only a hint when escape seems nearer or things are looking grim
+- The first 4 moves are a grace period: only a blatantly reckless action kills you there. After that, death comes easily, and the narrator always shows how your choice caused it
 - 3 rare easter eggs (5% chance each, never two in one run). The game tells you when you've found one
 
 <details>

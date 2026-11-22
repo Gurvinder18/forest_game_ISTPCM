@@ -102,6 +102,8 @@ body::after {
 .line.error { color: var(--danger); }
 .line.dead { color: var(--danger); font-size: 1.4em; }
 .line.won { color: var(--win); font-size: 1.4em; }
+.line.omen-good { color: var(--win); font-style: italic; }
+.line.omen-bad { color: var(--danger); font-style: italic; }
 .line.egg {
   color: var(--win);
   border: 1px dashed var(--win);

@@ -15,14 +15,37 @@ EGG_CHANCE = 0.05  # per easter egg; at most one egg per run
 
 # The forest is deadly: each move the server rolls whether the player dies,
 # depending on how the narrator rates their decision. Escape on the final move
-# needs more GOOD than BAD decisions AND a lucky roll.
-DEATH_CHANCE = {"BAD": 0.45, "NEUTRAL": 0.15, "GOOD": 0.04}
+# needs a positive decision score AND a lucky roll.
+#
+# Pacing: during the first GRACE_MOVES moves only a RECKLESS decision (a
+# blatantly stupid action) kills. After that the dice decide, so most runs
+# end around moves 5-7.
+DEATH_CHANCE = {"BAD": 0.5, "NEUTRAL": 0.15, "GOOD": 0.04}
+GRACE_MOVES = 4
 ESCAPE_CHANCE = 0.4
+RATINGS = ("GOOD", "NEUTRAL", "BAD", "RECKLESS")
 
-# Hidden quality of each A-D option the narrator offers, drawn per option.
+# Hidden quality of each option the narrator offers, drawn per option.
+# Each scene offers 2 or 3 options, picked at random.
 CHOICE_SHARES = {"BAD": 0.60, "NEUTRAL": 0.25, "GOOD": 0.15}
-NUM_CHOICES = 4
-_DECISION_TAG = re.compile(r"\[\s*Decision\s*:\s*(GOOD|NEUTRAL|BAD)\b", re.IGNORECASE)
+CHOICE_COUNTS = (2, 3)
+_DECISION_TAG = re.compile(r"\[\s*Decision\s*:\s*(GOOD|NEUTRAL|BAD|RECKLESS)\b", re.IGNORECASE)
+
+# The decision score stays hidden; the player only sees a hint when it gets
+# very high or very low (see omen()).
+SCORE_WEIGHTS = {"GOOD": 1, "NEUTRAL": 0, "BAD": -1, "RECKLESS": -2}
+HIGH_SCORE = 2
+LOW_SCORE = -2
+GOOD_OMENS = (
+    "Escape seems nearer. The forest's grip is loosening.",
+    "Things are looking your way. Keep your wits about you.",
+    "The trees thin a little. You sense a way out is close.",
+)
+BAD_OMENS = (
+    "Warning: things are looking grim. The forest is closing in.",
+    "Warning: your luck is running thin. One more mistake could be your last.",
+    "Warning: something has your scent now. Tread very carefully.",
+)
 
 EASTER_EGGS = {
     "bigfoot": {
@@ -93,7 +116,7 @@ def validate_run(raw):
 
 def decision_tally(history) -> dict:
     """Count the narrator's earlier [Decision: ...] ratings in the chat history."""
-    tally = {"GOOD": 0, "NEUTRAL": 0, "BAD": 0}
+    tally = dict.fromkeys(RATINGS, 0)
     for msg in history or []:
         if msg.get("role") == "assistant":
             for m in _DECISION_TAG.finditer(msg.get("content", "")):
@@ -110,16 +133,36 @@ def choice_labels(run: dict, commands) -> list:
     key = json.dumps([run["max_moves"], run["egg"], list(commands)])
     rng = random.Random(hashlib.sha256(key.encode("utf-8")).hexdigest())
     ratings, weights = zip(*CHOICE_SHARES.items())
-    return rng.choices(ratings, weights=weights, k=NUM_CHOICES)
+    return rng.choices(ratings, weights=weights, k=rng.choice(CHOICE_COUNTS))
 
 
 def _labelled(labels) -> str:
-    names = ["first", "second", "third", "fourth"]
+    names = ["first", "second", "third"]
     return ", ".join(f"{name} {label}" for name, label in zip(names, labels))
 
 
 def decision_score(tally: dict) -> int:
-    return tally["GOOD"] - 2 * tally["BAD"]
+    return sum(weight * tally.get(rating, 0) for rating, weight in SCORE_WEIGHTS.items())
+
+
+def _mood(tally: dict):
+    score = decision_score(tally)
+    if score >= HIGH_SCORE:
+        return "info"
+    if score <= LOW_SCORE:
+        return "warning"
+    return None
+
+
+def omen(before: dict, after: dict, rng=random):
+    """A hint for the player when the hidden score moves into the high or low band.
+
+    Shown once, on entering the band, so the score itself stays secret.
+    """
+    tone = _mood(after)
+    if tone is None or tone == _mood(before):
+        return None
+    return {"tone": tone, "text": rng.choice(GOOD_OMENS if tone == "info" else BAD_OMENS)}
 
 
 def roll_fate(run: dict, move: int, tally: dict, rng=random):
@@ -127,22 +170,35 @@ def roll_fate(run: dict, move: int, tally: dict, rng=random):
 
     Returns None for the opening scene and egg runs, {"BAD": bool, ...}
     (True = the player dies if their action gets that rating) for normal
-    moves, and "WON" or "DEAD" for the final move.
+    moves, and "WON" or "DEAD" for the final move. A RECKLESS decision is
+    always fatal; the other ratings can only kill after the grace moves.
     """
     if move == 0 or run["egg"]:
         return None
     if move >= run["max_moves"]:
-        earned = tally["GOOD"] > tally["BAD"]
+        earned = decision_score(tally) > 0
         return "WON" if earned and rng.random() < ESCAPE_CHANCE else "DEAD"
-    return {rating: rng.random() < chance for rating, chance in DEATH_CHANCE.items()}
+    if move <= GRACE_MOVES:
+        fate = dict.fromkeys(DEATH_CHANCE, False)
+    else:
+        fate = {rating: rng.random() < chance for rating, chance in DEATH_CHANCE.items()}
+    fate["RECKLESS"] = True
+    return fate
 
 
 RATING_RULES = (
-    "Start your reply with ONE line rating the player's latest decision, exactly like "
-    "'[Decision: BAD (-2)]', '[Decision: NEUTRAL (0)]' or '[Decision: GOOD (+1)]'. Be harsh: this forest "
-    "punishes mistakes, so most decisions are BAD, some are NEUTRAL, and GOOD is only for genuinely clever, "
-    "careful, well-informed choices. Rushing, making noise, trusting strangers, leaving cover, "
-    "touching unknown things or picking fights are BAD."
+    "Start your reply with ONE line rating the player's latest decision, exactly like '[Decision: BAD]', "
+    "'[Decision: NEUTRAL]', '[Decision: GOOD]' or '[Decision: RECKLESS]'. The player never sees this line. "
+    "Be harsh: this forest punishes mistakes, so most decisions are BAD, some are NEUTRAL, and GOOD is only "
+    "for genuinely clever, careful, well-informed choices. Rushing, making noise, trusting strangers, leaving "
+    "cover, touching unknown things or picking fights are BAD. RECKLESS is only for blatantly stupid or "
+    "suicidal actions, such as attacking a vampire bare-handed, jumping off a cliff or shouting to the hunters."
+)
+
+DEATH_RULES = (
+    "If the player dies in this reply, the death must never come out of nowhere. Show clearly, step by step, "
+    "how their decision caused it: what they did, what it exposed them to, and how that killed them. Spend at "
+    "least two sentences on the cause, even in a short reply, and end with a snarky line naming their mistake."
 )
 
 
@@ -157,7 +213,8 @@ def stage_instructions(run: dict, move: int, tally=None, fate=None, prev_labels=
     left = max_moves - move
 
     offer = (
-        f"SECRET quality of the 4 courses of action you weave into the end of this reply, in the order they appear: "
+        f"Weave exactly {len(next_labels or [])} courses of action into the end of this reply. "
+        f"Their SECRET quality, in the order they appear: "
         f"{_labelled(next_labels)}. Write each to match its quality (BAD ones should still look tempting), "
         "and never reveal the labels."
         if next_labels else ""
@@ -166,7 +223,7 @@ def stage_instructions(run: dict, move: int, tally=None, fate=None, prev_labels=
     if move == 0:
         return "\n".join(filter(None, ["This is the opening scene. Set the scene and ask what the player does.", offer]))
 
-    lines = [f"This is the player's move {move} of {max_moves}.", RATING_RULES]
+    lines = [f"This is the player's move {move} of {max_moves}.", RATING_RULES, DEATH_RULES]
     if prev_labels:
         lines.append(
             f"The courses of action you offered last time, in the order they appeared, were secretly: "
@@ -175,8 +232,8 @@ def stage_instructions(run: dict, move: int, tally=None, fate=None, prev_labels=
         )
     if tally is not None:
         lines.append(
-            f"Their decisions so far: {tally['GOOD']} good, {tally['NEUTRAL']} neutral, {tally['BAD']} bad "
-            f"(score {decision_score(tally)})."
+            f"Their decisions so far: {tally['GOOD']} good, {tally['NEUTRAL']} neutral, {tally['BAD']} bad, "
+            f"{tally.get('RECKLESS', 0)} reckless (score {decision_score(tally)}). Never mention the score."
         )
     if left == 0:
         lines.append(
@@ -218,6 +275,11 @@ def stage_instructions(run: dict, move: int, tally=None, fate=None, prev_labels=
                 for r, dies in fate.items()
             )
             lines.append(f"Fate is already decided by the dice: {outcomes}. Follow this exactly.")
+            if move <= GRACE_MOVES:
+                lines.append(
+                    "It is still early: unless the decision is RECKLESS, the player survives this move, though "
+                    "mistakes should leave them hurt, lost or hunted."
+                )
         else:
             lines.append("Death comes easily here: reckless or careless players die.")
     if left == 1:
