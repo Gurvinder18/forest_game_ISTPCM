@@ -2,7 +2,6 @@
 
 import re
 
-
 _STATUS_LINE = re.compile(
     r"^[^\w\n]*STATUS[^\w\n]*[:=\-][^\w\n]*(ALIVE|DEAD|WON|UNKNOWN)\b[^\n]*$",
     re.IGNORECASE | re.MULTILINE,
