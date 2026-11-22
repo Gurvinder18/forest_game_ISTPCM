@@ -10,7 +10,7 @@ logging.basicConfig(level=logging.INFO)  # before module imports so their startu
 from config import MAX_HISTORY_TOKENS, NARRATOR_LENGTH, NARRATOR_MODELS, NARRATOR_PROMPT, STATUS_MODELS, STATUS_PROMPT
 from modules.conversation import trim_history
 from modules.llm import classify_status, generate_reply, stream_reply
-from modules.runs import final_status, new_run, revealed_egg, stage_instructions, validate_run
+from modules.runs import choice_labels, decision_tally, final_status, new_run, revealed_egg, roll_fate, stage_instructions, validate_run
 from modules.text_formatter import StreamStatusFilter, extract_status, format_reply
 
 # Static files live in public/static so Vercel can serve them from its CDN.
@@ -69,9 +69,15 @@ def build_turn():
             return None, (jsonify({"error": "This run is over, restart the game"}), 400)
 
     history.append({"role": "user", "content": command[:MAX_COMMAND_CHARS]})
-    system = f"{NARRATOR_PROMPT}\n\n{stage_instructions(run, move)}"
+    tally = decision_tally(history)
+    fate = roll_fate(run, move, tally)
+    commands = [m["content"] for m in history if m["role"] == "user"]
+    prev_labels = choice_labels(run, commands[:-1]) if move > 0 else None
+    next_labels = choice_labels(run, commands) if move < run["max_moves"] else None
+    stage = stage_instructions(run, move, tally, fate, prev_labels, next_labels)
+    system = f"{NARRATOR_PROMPT}\n\n{stage}"
     chat = trim_history([{"role": "system", "content": system}] + history, MAX_HISTORY_TOKENS)
-    return {"chat": chat, "run": run, "move": move}, None
+    return {"chat": chat, "run": run, "move": move, "fate": fate, "tally": tally}, None
 
 
 def finish_reply(raw_reply: str, turn: dict) -> dict:
@@ -87,7 +93,7 @@ def finish_reply(raw_reply: str, turn: dict) -> dict:
         logging.info("Narrator left out the status tag; using the classifier")
         status = classify_status(STATUS_PROMPT, reply, STATUS_MODELS)
     run, move = turn["run"], turn["move"]
-    status = final_status(run, move, status)
+    status = final_status(run, move, status, turn.get("fate"))
     logging.info("Move %s/%s, player status: %s", move, run["max_moves"], status)
     return {
         "answer": reply,
@@ -95,6 +101,7 @@ def finish_reply(raw_reply: str, turn: dict) -> dict:
         "run": run,
         "move": move,
         "moves_left": run["max_moves"] - move,
+        "decisions": turn.get("tally"),
         "easter_egg": revealed_egg(run, move) if status != "DEAD" else None,
     }
 
